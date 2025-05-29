@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrect.Space - Free Video & MP3 Downloader</title>
+    <meta name="description" content="Download YouTube, Facebook, Instagram, and Twitter videos and convert to MP3. No signup. Fast & Free.">
+    <meta name="keywords" content="YouTube downloader, Instagram reels downloader, Facebook video download, Twitter video, MP3 converter">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>🎬 Extrect.Space</h1>
+        <p>Download videos & audio from YouTube, Instagram, Facebook, and Twitter easily.</p>
+    </header>
+
+    <main>
+        <div class="input-container">
+            <input id="videoUrl" type="url" placeholder="Paste your video/audio link here..." required>
+            <button type="button" onclick="fetchVideoDetails()">Fetch Details</button>
+        </div>
+
+        <div id="video-details" style="display: none;">
+            <h3>Select Download Option</h3>
+            <table id="quality-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Quality</th>
+                        <th>File Size (MB)</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="quality-options">
+                    <!-- Dynamically populated -->
+                </tbody>
+            </table>
+        </div>
+
+        <div id="progress-container" style="display: none; margin-top: 1em;">
+            <h3>Download Progress</h3>
+            <div id="progress-bar" style="width: 100%; background-color: #ddd; height: 20px; border-radius: 5px;">
+                <div id="progress" style="width: 0%; height: 100%; background-color: #4CAF50; border-radius: 5px;"></div>
+            </div>
+            <p id="progress-text">0%</p>
+        </div>
+
+        <section class="article">
+            <h2>Why Choose Extrect.Space?</h2>
+            <p>Extrect.Space is your all-in-one video and audio downloader tool. Whether you want to download a YouTube video, convert it to MP3, or grab the latest Instagram reel — we’ve got you covered!</p>
+            <h3>✨ Supported Platforms</h3>
+            <ul>
+                <li>YouTube Videos + MP3</li>
+                <li>Instagram Reels & Videos</li>
+                <li>Facebook Videos</li>
+                <li>Twitter Videos</li>
+            </ul>
+            <p>We never save your data. Files are automatically deleted after processing. Clean, fast and privacy focused — that's our promise.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>All rights reserved by <strong>extrect.space</strong> | Powered by <strong>MANIMA</strong></p>
+    </footer>
+
+    <script>
+        async function fetchVideoDetails() {
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url) {
+                alert('Please paste a valid URL!');
+                return;
+            }
+            try {
+                new URL(url);
+            } catch {
+                alert('Invalid URL! Please enter a proper URL.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/video-details?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+                if (response.ok) {
+                    displayVideoDetails(data);
+                } else {
+                    alert(data.error || 'Failed to fetch video details.');
+                }
+            } catch (error) {
+                alert('Error fetching video details: ' + error.message);
+            }
+        }
+
+        function displayVideoDetails(data) {
+            const qualityTable = document.getElementById('quality-options');
+            qualityTable.innerHTML = '';
+            const videoDetails = document.getElementById('video-details');
+            videoDetails.style.display = 'block';
+
+            const downloadOptions = [
+                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.best_size },
+                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data['1080p_size'] },
+                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data['720p_size'] },
+                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data['480p_size'] },
+                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data['360p_size'] },
+                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.mp3_size },
+            ];
+
+            downloadOptions.forEach(option => {
+                if (option.size) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${option.type}</td>
+                        <td>${option.quality}</td>
+                        <td>${option.size}</td>
+                        <td><button onclick="startDownload('${option.type.toLowerCase()}', '${option.format}')">Download</button></td>
+                    `;
+                    qualityTable.appendChild(row);
+                }
+            });
+        }
+
+        async function startDownload(type, format) {
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url) {
+                alert('Please paste a valid URL!');
+                return;
+            }
+            try {
+                new URL(url);
+            } catch {
+                alert('Invalid URL! Please enter a proper URL.');
+                return;
+            }
+
+            const response = await fetch(`/api/start-download?url=${encodeURIComponent(url)}&format=${encodeURIComponent(format)}&type=${type}`);
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Failed to start download.');
+                return;
+            }
+
+            const downloadId = data.download_id;
+            showProgress(downloadId);
+        }
+
+        function showProgress(downloadId) {
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress');
+            const progressText = document.getElementById('progress-text');
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.textContent = '0%';
+
+            const source = new EventSource(`/api/download-progress/${downloadId}`);
+            source.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const progress = data.progress || 0;
+                progressBar.style.width = `${progress}%`;
+                progressText.textContent = `${progress}%`;
+
+                if (data.status === 'completed') {
+                    source.close();
+                    window.location.href = `/api/get-file/${downloadId}`;
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                    }, 2000);
+                } else if (data.status === 'failed') {
+                    source.close();
+                    alert('Download failed: ' + (data.error || 'Unknown error'));
+                    progressContainer.style.display = 'none';
+                }
+            };
+            source.onerror = function() {
+                source.close();
+                alert('Error tracking download progress.');
+                progressContainer.style.display = 'none';
+            };
+        }
+    </script>
+</body>
+</html>
