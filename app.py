@@ -226,5 +226,25 @@ def get_file(download_id):
         download_progress.pop(download_id, None)
     return response
 
+from yt_dlp import YoutubeDL
+
+ydl_opts = {
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'cookiefile': 'www.youtube.com_cookies.txt',
+    'format': 'bestvideo+bestaudio/best',
+    'noplaylist': True,
+}
+
+def get_video_details(url):
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return {
+                'title': info.get('title'),
+                'thumbnail': info.get('thumbnail'),
+                'formats': info.get('formats', []),
+            }
+    except Exception as e:
+        return f"Failed to fetch video details: {str(e)}"
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
