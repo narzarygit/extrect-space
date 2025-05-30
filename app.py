@@ -96,7 +96,7 @@ def video_details():
         title = video_info["snippet"]["title"]
         thumbnail = video_info["snippet"]["thumbnails"]["high"]["url"]
 
-        # Use yt-dlp to get video sizes (if needed)
+        # Use yt-dlp to get video sizes (if cookies file is valid)
         ydl_opts = {
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'cookiefile': 'www.youtube.com_cookies.txt',
@@ -107,10 +107,25 @@ def video_details():
             'skip_download': True,
         }
 
-        # Check if cookies file exists
-        if not os.path.exists('www.youtube.com_cookies.txt'):
-            logger.error("Cookies file not found: www.youtube.com_cookies.txt")
+        # Validate cookies file
+        cookies_file = 'www.youtube.com_cookies.txt'
+        if not os.path.exists(cookies_file):
+            logger.warning("Cookies file not found: www.youtube.com_cookies.txt")
             # Return response without sizes if cookies are missing
+            response = {
+                "title": title,
+                "thumbnail": thumbnail,
+                "sizes": {}
+            }
+            return jsonify(response)
+
+        # Check if cookies file is valid UTF-8
+        try:
+            with open(cookies_file, 'r', encoding='utf-8') as f:
+                f.read()
+        except UnicodeDecodeError as e:
+            logger.error(f"Cookies file is not valid UTF-8: {str(e)}")
+            # Return response without sizes if cookies file is invalid
             response = {
                 "title": title,
                 "thumbnail": thumbnail,
@@ -205,6 +220,18 @@ def start_download():
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'cookiefile': 'www.youtube.com_cookies.txt',
         }
+
+        # Validate cookies file for download as well
+        cookies_file = 'www.youtube.com_cookies.txt'
+        if os.path.exists(cookies_file):
+            try:
+                with open(cookies_file, 'r', encoding='utf-8') as f:
+                    f.read()
+            except UnicodeDecodeError as e:
+                logger.error(f"Cookies file is not valid UTF-8 for download: {str(e)}")
+                download_progress[download_id]["status"] = "failed"
+                download_progress[download_id]["error"] = "Invalid cookies file encoding"
+                return
 
         if type == "audio":
             ydl_opts_download['merge_output_format'] = None

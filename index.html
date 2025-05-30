@@ -6,6 +6,7 @@
     <title>Extrect.Space - Free Video & MP3 Downloader</title>
     <meta name="description" content="Download YouTube, Facebook, Instagram, and Twitter videos and convert to MP3. No signup. Fast & Free.">
     <meta name="keywords" content="YouTube downloader, Instagram reels downloader, Facebook video download, Twitter video, MP3 converter">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -17,8 +18,13 @@
     <main>
         <div class="input-container">
             <input id="videoUrl" type="url" placeholder="Paste your video/audio link here..." required>
-            <button type="button" onclick="fetchVideoDetails()">Fetch Details</button>
+            <button id="fetchButton" type="button" onclick="fetchVideoDetails()">
+                <span id="fetchText">Fetch Details</span>
+                <span id="loadingSpinner" class="spinner" style="display: none;"></span>
+            </button>
         </div>
+
+        <div id="error-message" style="display: none; color: red; margin-top: 1em;"></div>
 
         <div id="video-details" style="display: none;">
             <h3>Select Download Option</h3>
@@ -66,16 +72,30 @@
     <script>
         async function fetchVideoDetails() {
             const url = document.getElementById('videoUrl').value.trim();
+            const errorMessageDiv = document.getElementById('error-message');
+            errorMessageDiv.style.display = 'none';
+            errorMessageDiv.textContent = '';
+
             if (!url) {
-                alert('Please paste a valid URL!');
+                errorMessageDiv.textContent = 'Please paste a valid URL!';
+                errorMessageDiv.style.display = 'block';
                 return;
             }
             try {
                 new URL(url);
             } catch {
-                alert('Invalid URL! Please enter a proper URL.');
+                errorMessageDiv.textContent = 'Invalid URL! Please enter a proper URL.';
+                errorMessageDiv.style.display = 'block';
                 return;
             }
+
+            // Show loading spinner
+            const fetchButton = document.getElementById('fetchButton');
+            const fetchText = document.getElementById('fetchText');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            fetchButton.disabled = true;
+            fetchText.style.display = 'none';
+            loadingSpinner.style.display = 'inline-block';
 
             try {
                 const response = await fetch(`/api/video-details?url=${encodeURIComponent(url)}`);
@@ -83,10 +103,17 @@
                 if (response.ok) {
                     displayVideoDetails(data);
                 } else {
-                    alert(data.error || 'Failed to fetch video details.');
+                    errorMessageDiv.textContent = data.error || 'Failed to fetch video details.';
+                    errorMessageDiv.style.display = 'block';
                 }
             } catch (error) {
-                alert('Error fetching video details: ' + error.message);
+                errorMessageDiv.textContent = 'Error fetching video details: ' + error.message;
+                errorMessageDiv.style.display = 'block';
+            } finally {
+                // Hide loading spinner
+                fetchButton.disabled = false;
+                fetchText.style.display = 'inline-block';
+                loadingSpinner.style.display = 'none';
             }
         }
 
@@ -97,12 +124,12 @@
             videoDetails.style.display = 'block';
 
             const downloadOptions = [
-                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.best_size },
-                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data['1080p_size'] },
-                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data['720p_size'] },
-                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data['480p_size'] },
-                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data['360p_size'] },
-                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.mp3_size },
+                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.sizes?.best_size },
+                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data.sizes?.['1080p_size'] },
+                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data.sizes?.['720p_size'] },
+                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data.sizes?.['480p_size'] },
+                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data.sizes?.['360p_size'] },
+                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.sizes?.mp3_size },
             ];
 
             downloadOptions.forEach(option => {
@@ -121,21 +148,28 @@
 
         async function startDownload(type, format) {
             const url = document.getElementById('videoUrl').value.trim();
+            const errorMessageDiv = document.getElementById('error-message');
+            errorMessageDiv.style.display = 'none';
+            errorMessageDiv.textContent = '';
+
             if (!url) {
-                alert('Please paste a valid URL!');
+                errorMessageDiv.textContent = 'Please paste a valid URL!';
+                errorMessageDiv.style.display = 'block';
                 return;
             }
             try {
                 new URL(url);
             } catch {
-                alert('Invalid URL! Please enter a proper URL.');
+                errorMessageDiv.textContent = 'Invalid URL! Please enter a proper URL.';
+                errorMessageDiv.style.display = 'block';
                 return;
             }
 
             const response = await fetch(`/api/start-download?url=${encodeURIComponent(url)}&format=${encodeURIComponent(format)}&type=${type}`);
             const data = await response.json();
             if (!response.ok) {
-                alert(data.error || 'Failed to start download.');
+                errorMessageDiv.textContent = data.error || 'Failed to start download.';
+                errorMessageDiv.style.display = 'block';
                 return;
             }
 
@@ -147,6 +181,7 @@
             const progressContainer = document.getElementById('progress-container');
             const progressBar = document.getElementById('progress');
             const progressText = document.getElementById('progress-text');
+            const errorMessageDiv = document.getElementById('error-message');
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressText.textContent = '0%';
@@ -166,13 +201,15 @@
                     }, 2000);
                 } else if (data.status === 'failed') {
                     source.close();
-                    alert('Download failed: ' + (data.error || 'Unknown error'));
+                    errorMessageDiv.textContent = 'Download failed: ' + (data.error || 'Unknown error');
+                    errorMessageDiv.style.display = 'block';
                     progressContainer.style.display = 'none';
                 }
             };
             source.onerror = function() {
                 source.close();
-                alert('Error tracking download progress.');
+                errorMessageDiv.textContent = 'Error tracking download progress.';
+                errorMessageDiv.style.display = 'block';
                 progressContainer.style.display = 'none';
             };
         }
