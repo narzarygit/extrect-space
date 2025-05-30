@@ -73,8 +73,10 @@
         async function fetchVideoDetails() {
             const url = document.getElementById('videoUrl').value.trim();
             const errorMessageDiv = document.getElementById('error-message');
+            const videoDetailsDiv = document.getElementById('video-details');
             errorMessageDiv.style.display = 'none';
             errorMessageDiv.textContent = '';
+            videoDetailsDiv.style.display = 'none';
 
             if (!url) {
                 errorMessageDiv.textContent = 'Please paste a valid URL!';

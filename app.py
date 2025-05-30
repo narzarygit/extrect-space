@@ -9,6 +9,7 @@ import shutil
 import time
 import json
 import requests
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 
@@ -81,8 +82,26 @@ def video_details():
         logger.error("No URL provided")
         return jsonify({"error": "No URL provided"}), 400
 
+    # Check if the URL is from YouTube
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc.lower()
+    if not (domain in ['www.youtube.com', 'youtu.be', 'youtube.com']):
+        logger.warning(f"Unsupported platform for URL: {url}")
+        return jsonify({"error": "Only YouTube URLs are supported at the moment. Support for Instagram, Facebook, and Twitter coming soon!"}), 400
+
     # Extract video ID from URL
-    video_id = url.split("v=")[1] if "v=" in url else url.split("/")[-1]
+    if domain == 'youtu.be':
+        video_id = parsed_url.path.lstrip('/')
+    else:
+        query = parsed_url.query
+        video_id = None
+        for param in query.split('&'):
+            if param.startswith('v='):
+                video_id = param.split('=')[1]
+                break
+        if not video_id:
+            logger.error("Could not extract video ID from URL")
+            return jsonify({"error": "Invalid YouTube URL"}), 400
 
     # Fetch video details using YouTube API
     api_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id={video_id}&key={YOUTUBE_API_KEY}"
