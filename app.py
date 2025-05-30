@@ -1,7 +1,6 @@
 from flask import Flask, request, send_file, jsonify, Response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import yt_dlp
 import os
 import uuid
 import logging
@@ -10,6 +9,7 @@ import time
 import json
 import requests
 from urllib.parse import urlparse
+import isodate  # For parsing YouTube API duration
 
 app = Flask(__name__)
 
@@ -114,103 +114,32 @@ def video_details():
         video_info = data["items"][0]
         title = video_info["snippet"]["title"]
         thumbnail = video_info["snippet"]["thumbnails"]["high"]["url"]
+        duration = isodate.parse_duration(video_info["contentDetails"]["duration"]).total_seconds()
 
-        # Use yt-dlp to get video sizes (if cookies file is valid)
-        ydl_opts = {
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'cookiefile': 'www.youtube.com_cookies.txt',
-            'format': 'bestvideo+bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
+        # Estimate video sizes based on duration
+        # Bitrate assumptions (in bits per second)
+        bitrate_1080p = 8000000  # 8 Mbps for 1080p
+        bitrate_720p = 4000000   # 4 Mbps for 720p
+        bitrate_480p = 2000000   # 2 Mbps for 480p
+        bitrate_360p = 1000000   # 1 Mbps for 360p
+        bitrate_mp3 = 192000     # 192 kbps for MP3
+
+        # Calculate sizes in MB
+        sizes = {
+            'best_size': round((bitrate_1080p * duration) / (8 * 1024 * 1024), 2),  # 1080p as best
+            '1080p_size': round((bitrate_1080p * duration) / (8 * 1024 * 1024), 2),
+            '720p_size': round((bitrate_720p * duration) / (8 * 1024 * 1024), 2),
+            '480p_size': round((bitrate_480p * duration) / (8 * 1024 * 1024), 2),
+            '360p_size': round((bitrate_360p * duration) / (8 * 1024 * 1024), 2),
+            'mp3_size': round((bitrate_mp3 * duration) / (8 * 1024 * 1024), 2),
         }
 
-        # Validate cookies file
-        cookies_file = 'www.youtube.com_cookies.txt'
-        if not os.path.exists(cookies_file):
-            logger.warning("Cookies file not found: www.youtube.com_cookies.txt")
-            # Return response without sizes if cookies are missing
-            response = {
-                "title": title,
-                "thumbnail": thumbnail,
-                "sizes": {}
-            }
-            return jsonify(response)
-
-        # Check if cookies file is valid UTF-8
-        try:
-            with open(cookies_file, 'r', encoding='utf-8') as f:
-                f.read()
-        except UnicodeDecodeError as e:
-            logger.error(f"Cookies file is not valid UTF-8: {str(e)}")
-            # Return response without sizes if cookies file is invalid
-            response = {
-                "title": title,
-                "thumbnail": thumbnail,
-                "sizes": {}
-            }
-            return jsonify(response)
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                formats = info.get('formats', [])
-
-                sizes = {
-                    'best_size': None,
-                    '1080p_size': None,
-                    '720p_size': None,
-                    '480p_size': None,
-                    '360p_size': None,
-                    'mp3_size': None,
-                }
-
-                best_height = 0
-                for fmt in formats:
-                    height = fmt.get('height')
-                    filesize = fmt.get('filesize') or fmt.get('filesize_approx')
-                    if filesize:
-                        filesize_mb = round(filesize / (1024 * 1024), 2)
-                        if height and isinstance(height, int):
-                            if height <= 360 and not sizes['360p_size']:
-                                sizes['360p_size'] = filesize_mb
-                            elif height <= 480 and not sizes['480p_size']:
-                                sizes['480p_size'] = filesize_mb
-                            elif height <= 720 and not sizes['720p_size']:
-                                sizes['720p_size'] = filesize_mb
-                            elif height <= 1080 and not sizes['1080p_size']:
-                                sizes['1080p_size'] = filesize_mb
-                            if height > best_height:
-                                sizes['best_size'] = filesize_mb
-                                best_height = height
-                    if fmt.get('format_id') == 'bestaudio' or fmt.get('abr'):
-                        audio_filesize = fmt.get('filesize') or fmt.get('filesize_approx')
-                        if audio_filesize and not sizes['mp3_size']:
-                            sizes['mp3_size'] = round(audio_filesize / (1024 * 1024), 2)
-
-                if not sizes['mp3_size'] and info.get('duration'):
-                    duration = info['duration']
-                    bitrate = 192
-                    mp3_size_bits = duration * bitrate * 1000
-                    sizes['mp3_size'] = round(mp3_size_bits / (8 * 1024 * 1024), 2)
-
-                response = {
-                    "title": title,
-                    "thumbnail": thumbnail,
-                    "sizes": sizes
-                }
-                return jsonify(response)
-
-        except Exception as e:
-            logger.error(f"Failed to fetch video sizes with yt-dlp: {str(e)}")
-            # Return response without sizes if yt-dlp fails
-            response = {
-                "title": title,
-                "thumbnail": thumbnail,
-                "sizes": {}
-            }
-            return jsonify(response)
+        response = {
+            "title": title,
+            "thumbnail": thumbnail,
+            "sizes": sizes
+        }
+        return jsonify(response)
 
     except Exception as e:
         logger.error(f"Failed to fetch video details with YouTube API: {str(e)}")
@@ -229,41 +158,30 @@ def start_download():
     download_progress[download_id] = {"progress": 0, "status": "starting"}
 
     def download_task():
-        output_template = os.path.join(DOWNLOAD_FOLDER, f"{download_id}.%(ext)s")
-        ydl_opts_download = {
-            'format': format,
-            'outtmpl': output_template,
-            'quiet': True,
-            'no_warnings': True,
-            'progress_hooks': [lambda d: update_progress(d, download_id)],
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'cookiefile': 'www.youtube.com_cookies.txt',
-        }
-
-        # Validate cookies file for download as well
-        cookies_file = 'www.youtube.com_cookies.txt'
-        if os.path.exists(cookies_file):
-            try:
-                with open(cookies_file, 'r', encoding='utf-8') as f:
-                    f.read()
-            except UnicodeDecodeError as e:
-                logger.error(f"Cookies file is not valid UTF-8 for download: {str(e)}")
-                download_progress[download_id]["status"] = "failed"
-                download_progress[download_id]["error"] = "Invalid cookies file encoding"
-                return
-
-        if type == "audio":
-            ydl_opts_download['merge_output_format'] = None
-            ydl_opts_download['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
-        else:
-            ydl_opts_download['merge_output_format'] = 'mp4'
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+            # Use youtube_dl instead of yt_dlp for download
+            import youtube_dl
+            output_template = os.path.join(DOWNLOAD_FOLDER, f"{download_id}.%(ext)s")
+            ydl_opts_download = {
+                'format': format,
+                'outtmpl': output_template,
+                'quiet': True,
+                'no_warnings': True,
+                'progress_hooks': [lambda d: update_progress(d, download_id)],
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            }
+
+            if type == "audio":
+                ydl_opts_download['merge_output_format'] = None
+                ydl_opts_download['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
+            else:
+                ydl_opts_download['merge_output_format'] = 'mp4'
+
+            with youtube_dl.YoutubeDL(ydl_opts_download) as ydl:
                 info = ydl.extract_info(url, download=True)
                 downloaded_file = ydl.prepare_filename(info)
                 if type == "audio":

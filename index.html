@@ -126,25 +126,23 @@
             videoDetails.style.display = 'block';
 
             const downloadOptions = [
-                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.sizes?.best_size },
-                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data.sizes?.['1080p_size'] },
-                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data.sizes?.['720p_size'] },
-                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data.sizes?.['480p_size'] },
-                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data.sizes?.['360p_size'] },
-                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.sizes?.mp3_size },
+                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.sizes?.best_size || 'N/A' },
+                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data.sizes?.['1080p_size'] || 'N/A' },
+                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data.sizes?.['720p_size'] || 'N/A' },
+                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data.sizes?.['480p_size'] || 'N/A' },
+                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data.sizes?.['360p_size'] || 'N/A' },
+                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.sizes?.mp3_size || 'N/A' },
             ];
 
             downloadOptions.forEach(option => {
-                if (option.size) {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${option.type}</td>
-                        <td>${option.quality}</td>
-                        <td>${option.size}</td>
-                        <td><button onclick="startDownload('${option.type.toLowerCase()}', '${option.format}')">Download</button></td>
-                    `;
-                    qualityTable.appendChild(row);
-                }
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${option.type}</td>
+                    <td>${option.quality}</td>
+                    <td>${option.size}</td>
+                    <td><button onclick="startDownload('${option.type.toLowerCase()}', '${option.format}')">Download</button></td>
+                `;
+                qualityTable.appendChild(row);
             });
         }
 
