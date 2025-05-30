@@ -68,6 +68,16 @@ def serve_index():
         return "File not found", 404
     return send_file(index_path)
 
+ydl_opts = {
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'cookiefile': 'www.youtube.com_cookies.txt',
+    'format': 'bestvideo+bestaudio/best',
+    'noplaylist': True,
+    'quiet': True,
+    'no_warnings': True,
+    'skip_download': True,
+}
+
 @app.route("/api/video-details")
 @limiter.limit("5 per minute")
 def video_details():
@@ -76,13 +86,6 @@ def video_details():
     if not url:
         logger.error("No URL provided")
         return jsonify({"error": "No URL provided"}), 400
-
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'format': 'bestvideo+bestaudio/best',
-    }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -127,7 +130,12 @@ def video_details():
                 mp3_size_bits = duration * bitrate * 1000
                 sizes['mp3_size'] = round(mp3_size_bits / (8 * 1024 * 1024), 2)
 
-        return jsonify(sizes)
+            response = {
+                "title": info.get('title'),
+                "thumbnail": info.get('thumbnail'),
+                "sizes": sizes
+            }
+            return jsonify(response)
 
     except Exception as e:
         logger.error(f"Failed to fetch video details: {str(e)}")
@@ -147,31 +155,31 @@ def start_download():
 
     def download_task():
         output_template = os.path.join(DOWNLOAD_FOLDER, f"{download_id}.%(ext)s")
-        ydl_opts = {
+        ydl_opts_download = {
             'format': format,
             'outtmpl': output_template,
             'quiet': True,
             'no_warnings': True,
             'progress_hooks': [lambda d: update_progress(d, download_id)],
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'cookiefile': 'www.youtube.com_cookies.txt',
         }
 
         if type == "audio":
-            ydl_opts['merge_output_format'] = None
-            ydl_opts['postprocessors'] = [{
+            ydl_opts_download['merge_output_format'] = None
+            ydl_opts_download['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }]
         else:
-            ydl_opts['merge_output_format'] = 'mp4'
+            ydl_opts_download['merge_output_format'] = 'mp4'
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
                 info = ydl.extract_info(url, download=True)
-                # Get the actual downloaded file path after postprocessing
                 downloaded_file = ydl.prepare_filename(info)
                 if type == "audio":
-                    # After FFmpegExtractAudio, the extension changes to .mp3
                     downloaded_file = downloaded_file.rsplit('.', 1)[0] + '.mp3'
                 else:
                     downloaded_file = downloaded_file.rsplit('.', 1)[0] + '.mp4'
@@ -226,25 +234,82 @@ def get_file(download_id):
         download_progress.pop(download_id, None)
     return response
 
-from yt_dlp import YoutubeDL
-
-ydl_opts = {
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0', port=5000)
+    ydl_opts = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'cookiefile': 'www.youtube.com_cookies.txt',
     'format': 'bestvideo+bestaudio/best',
     'noplaylist': True,
+    'quiet': True,
+    'no_warnings': True,
+    'skip_download': True,
 }
 
-def get_video_details(url):
+@app.route("/api/video-details")
+@limiter.limit("5 per minute")
+def video_details():
+    url = request.args.get("url")
+    logger.debug(f"Received video details request with URL: {url}")
+    if not url:
+        logger.error("No URL provided")
+        return jsonify({"error": "No URL provided"}), 400
+
+    # Check if cookies file exists
+    if not os.path.exists('www.youtube.com_cookies.txt'):
+        logger.error("Cookies file not found: www.youtube.com_cookies.txt")
+        return jsonify({"error": "Cookies file not found. Please contact the admin."}), 500
+
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            return {
-                'title': info.get('title'),
-                'thumbnail': info.get('thumbnail'),
-                'formats': info.get('formats', []),
+            formats = info.get('formats', [])
+
+            sizes = {
+                'best_size': None,
+                '1080p_size': None,
+                '720p_size': None,
+                '480p_size': None,
+                '360p_size': None,
+                'mp3_size': None,
             }
+
+            best_height = 0
+            for fmt in formats:
+                height = fmt.get('height')
+                filesize = fmt.get('filesize') or fmt.get('filesize_approx')
+                if filesize:
+                    filesize_mb = round(filesize / (1024 * 1024), 2)
+                    if height and isinstance(height, int):
+                        if height <= 360 and not sizes['360p_size']:
+                            sizes['360p_size'] = filesize_mb
+                        elif height <= 480 and not sizes['480p_size']:
+                            sizes['480p_size'] = filesize_mb
+                        elif height <= 720 and not sizes['720p_size']:
+                            sizes['720p_size'] = filesize_mb
+                        elif height <= 1080 and not sizes['1080p_size']:
+                            sizes['1080p_size'] = filesize_mb
+                        if height > best_height:
+                            sizes['best_size'] = filesize_mb
+                            best_height = height
+                if fmt.get('format_id') == 'bestaudio' or fmt.get('abr'):
+                    audio_filesize = fmt.get('filesize') or fmt.get('filesize_approx')
+                    if audio_filesize and not sizes['mp3_size']:
+                        sizes['mp3_size'] = round(audio_filesize / (1024 * 1024), 2)
+
+            if not sizes['mp3_size'] and info.get('duration'):
+                duration = info['duration']
+                bitrate = 192
+                mp3_size_bits = duration * bitrate * 1000
+                sizes['mp3_size'] = round(mp3_size_bits / (8 * 1024 * 1024), 2)
+
+            response = {
+                "title": info.get('title'),
+                "thumbnail": info.get('thumbnail'),
+                "sizes": sizes
+            }
+            return jsonify(response)
+
     except Exception as e:
-        return f"Failed to fetch video details: {str(e)}"
-if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0', port=5000)
+        logger.error(f"Failed to fetch video details: {str(e)}")
+        return jsonify({"error": f"Failed to fetch video details: {str(e)}"}), 500
