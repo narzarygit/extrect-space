@@ -10,6 +10,7 @@ import json
 import requests
 from urllib.parse import urlparse
 import isodate  # For parsing YouTube API duration
+from pytube import YouTube
 
 app = Flask(__name__)
 
@@ -117,7 +118,6 @@ def video_details():
         duration = isodate.parse_duration(video_info["contentDetails"]["duration"]).total_seconds()
 
         # Estimate video sizes based on duration
-        # Bitrate assumptions (in bits per second)
         bitrate_1080p = 8000000  # 8 Mbps for 1080p
         bitrate_720p = 4000000   # 4 Mbps for 720p
         bitrate_480p = 2000000   # 2 Mbps for 480p
@@ -159,38 +159,37 @@ def start_download():
 
     def download_task():
         try:
-            # Use youtube_dl instead of yt_dlp for download
-            import youtube_dl
-            output_template = os.path.join(DOWNLOAD_FOLDER, f"{download_id}.%(ext)s")
-            ydl_opts_download = {
-                'format': format,
-                'outtmpl': output_template,
-                'quiet': True,
-                'no_warnings': True,
-                'progress_hooks': [lambda d: update_progress(d, download_id)],
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            }
-
+            yt = YouTube(url, on_progress_callback=lambda stream, chunk, bytes_remaining: update_progress_pytube(download_id, stream, bytes_remaining))
+            
             if type == "audio":
-                ydl_opts_download['merge_output_format'] = None
-                ydl_opts_download['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }]
+                # Download audio stream
+                stream = yt.streams.filter(only_audio=True).first()
+                if not stream:
+                    raise Exception("No audio stream available")
+                output_file = stream.download(output_path=DOWNLOAD_FOLDER, filename=f"{download_id}.mp3")
             else:
-                ydl_opts_download['merge_output_format'] = 'mp4'
-
-            with youtube_dl.YoutubeDL(ydl_opts_download) as ydl:
-                info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
-                if type == "audio":
-                    downloaded_file = downloaded_file.rsplit('.', 1)[0] + '.mp3'
+                # Map the format to pytube resolution
+                resolution_map = {
+                    'bestvideo[height<=1080]+bestaudio/best[height<=1080]': '1080p',
+                    'bestvideo[height<=720]+bestaudio/best[height<=720]': '720p',
+                    'bestvideo[height<=480]+bestaudio/best[height<=480]': '480p',
+                    'bestvideo[height<=360]+bestaudio/best[height<=360]': '360p',
+                    'bestvideo+bestaudio/best': None,  # Best available
+                }
+                resolution = resolution_map.get(format)
+                
+                if resolution:
+                    stream = yt.streams.filter(progressive=True, resolution=resolution).first()
                 else:
-                    downloaded_file = downloaded_file.rsplit('.', 1)[0] + '.mp4'
-                logger.debug(f"Downloaded file path: {downloaded_file}")
+                    stream = yt.streams.filter(progressive=True).order_by('resolution').desc().first()
+                
+                if not stream:
+                    raise Exception(f"No video stream available for resolution: {resolution}")
+                output_file = stream.download(output_path=DOWNLOAD_FOLDER, filename=f"{download_id}.mp4")
+
+            logger.debug(f"Downloaded file path: {output_file}")
             download_progress[download_id]["status"] = "completed"
-            download_progress[download_id]["file_path"] = downloaded_file
+            download_progress[download_id]["file_path"] = output_file
         except Exception as e:
             logger.error(f"Download failed: {str(e)}")
             download_progress[download_id]["status"] = "failed"
@@ -199,12 +198,12 @@ def start_download():
     threading.Thread(target=download_task, daemon=True).start()
     return jsonify({"download_id": download_id})
 
-def update_progress(d, download_id):
-    if d['status'] == 'downloading':
-        if 'total_bytes' in d and 'downloaded_bytes' in d:
-            percent = (d['downloaded_bytes'] / d['total_bytes']) * 100
-            download_progress[download_id]["progress"] = round(percent, 2)
-    elif d['status'] == 'finished':
+def update_progress_pytube(download_id, stream, bytes_remaining):
+    total_size = stream.filesize
+    bytes_downloaded = total_size - bytes_remaining
+    percent = (bytes_downloaded / total_size) * 100
+    download_progress[download_id]["progress"] = round(percent, 2)
+    if percent >= 100:
         download_progress[download_id]["progress"] = 100
 
 @app.route("/api/download-progress/<download_id>")

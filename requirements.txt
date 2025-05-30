@@ -1,6 +1,6 @@
 flask
 flask-limiter
 requests
-youtube_dl
+pytube
 isodate
 gunicorn
