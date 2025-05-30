@@ -8,6 +8,8 @@
     <meta name="keywords" content="YouTube downloader, Instagram reels downloader, Facebook video download, Twitter video, MP3 converter">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Include ytdl-core via CDN -->
+    <script src="https://unpkg.com/ytdl-core@latest/dist/ytdl.min.js"></script>
 </head>
 <body>
     <header>
@@ -41,14 +43,6 @@
                     <!-- Dynamically populated -->
                 </tbody>
             </table>
-        </div>
-
-        <div id="progress-container" style="display: none; margin-top: 1em;">
-            <h3>Download Progress</h3>
-            <div id="progress-bar" style="width: 100%; background-color: #ddd; height: 20px; border-radius: 5px;">
-                <div id="progress" style="width: 0%; height: 100%; background-color: #4CAF50; border-radius: 5px;"></div>
-            </div>
-            <p id="progress-text">0%</p>
         </div>
 
         <section class="article">
@@ -103,7 +97,7 @@
                 const response = await fetch(`/api/video-details?url=${encodeURIComponent(url)}`);
                 const data = await response.json();
                 if (response.ok) {
-                    displayVideoDetails(data);
+                    displayVideoDetails(data, url);
                 } else {
                     errorMessageDiv.textContent = data.error || 'Failed to fetch video details.';
                     errorMessageDiv.style.display = 'block';
@@ -119,19 +113,19 @@
             }
         }
 
-        function displayVideoDetails(data) {
+        function displayVideoDetails(data, url) {
             const qualityTable = document.getElementById('quality-options');
             qualityTable.innerHTML = '';
             const videoDetails = document.getElementById('video-details');
             videoDetails.style.display = 'block';
 
             const downloadOptions = [
-                { type: 'Video', quality: 'Best', format: 'bestvideo+bestaudio/best', size: data.sizes?.best_size || 'N/A' },
-                { type: 'Video', quality: '1080p', format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]', size: data.sizes?.['1080p_size'] || 'N/A' },
-                { type: 'Video', quality: '720p', format: 'bestvideo[height<=720]+bestaudio/best[height<=720]', size: data.sizes?.['720p_size'] || 'N/A' },
-                { type: 'Video', quality: '480p', format: 'bestvideo[height<=480]+bestaudio/best[height<=480]', size: data.sizes?.['480p_size'] || 'N/A' },
-                { type: 'Video', quality: '360p', format: 'bestvideo[height<=360]+bestaudio/best[height<=360]', size: data.sizes?.['360p_size'] || 'N/A' },
-                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'bestaudio/best', size: data.sizes?.mp3_size || 'N/A' },
+                { type: 'Video', quality: 'Best', format: 'highest', size: data.sizes?.best_size || 'N/A' },
+                { type: 'Video', quality: '1080p', format: '1080p', size: data.sizes?.['1080p_size'] || 'N/A' },
+                { type: 'Video', quality: '720p', format: '720p', size: data.sizes?.['720p_size'] || 'N/A' },
+                { type: 'Video', quality: '480p', format: '480p', size: data.sizes?.['480p_size'] || 'N/A' },
+                { type: 'Video', quality: '360p', format: '360p', size: data.sizes?.['360p_size'] || 'N/A' },
+                { type: 'Audio', quality: 'MP3 (192kbps)', format: 'audio', size: data.sizes?.mp3_size || 'N/A' },
             ];
 
             downloadOptions.forEach(option => {
@@ -140,78 +134,59 @@
                     <td>${option.type}</td>
                     <td>${option.quality}</td>
                     <td>${option.size}</td>
-                    <td><button onclick="startDownload('${option.type.toLowerCase()}', '${option.format}')">Download</button></td>
+                    <td><button onclick="startDownload('${url}', '${option.type.toLowerCase()}', '${option.format}')">Download</button></td>
                 `;
                 qualityTable.appendChild(row);
             });
         }
 
-        async function startDownload(type, format) {
-            const url = document.getElementById('videoUrl').value.trim();
+        async function startDownload(url, type, format) {
             const errorMessageDiv = document.getElementById('error-message');
             errorMessageDiv.style.display = 'none';
             errorMessageDiv.textContent = '';
 
-            if (!url) {
-                errorMessageDiv.textContent = 'Please paste a valid URL!';
-                errorMessageDiv.style.display = 'block';
-                return;
-            }
             try {
-                new URL(url);
-            } catch {
-                errorMessageDiv.textContent = 'Invalid URL! Please enter a proper URL.';
-                errorMessageDiv.style.display = 'block';
-                return;
-            }
+                const info = await ytdl.getInfo(url);
+                let streamUrl;
 
-            const response = await fetch(`/api/start-download?url=${encodeURIComponent(url)}&format=${encodeURIComponent(format)}&type=${type}`);
-            const data = await response.json();
-            if (!response.ok) {
-                errorMessageDiv.textContent = data.error || 'Failed to start download.';
-                errorMessageDiv.style.display = 'block';
-                return;
-            }
-
-            const downloadId = data.download_id;
-            showProgress(downloadId);
-        }
-
-        function showProgress(downloadId) {
-            const progressContainer = document.getElementById('progress-container');
-            const progressBar = document.getElementById('progress');
-            const progressText = document.getElementById('progress-text');
-            const errorMessageDiv = document.getElementById('error-message');
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressText.textContent = '0%';
-
-            const source = new EventSource(`/api/download-progress/${downloadId}`);
-            source.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                const progress = data.progress || 0;
-                progressBar.style.width = `${progress}%`;
-                progressText.textContent = `${progress}%`;
-
-                if (data.status === 'completed') {
-                    source.close();
-                    window.location.href = `/api/get-file/${downloadId}`;
-                    setTimeout(() => {
-                        progressContainer.style.display = 'none';
-                    }, 2000);
-                } else if (data.status === 'failed') {
-                    source.close();
-                    errorMessageDiv.textContent = 'Download failed: ' + (data.error || 'Unknown error');
+                if (type === 'audio') {
+                    // Note: ytdl-core doesn't support audio conversion to MP3 directly in browser
+                    // For now, we'll download the audio stream as-is (webm or m4a format)
+                    const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+                    if (audioFormats.length === 0) {
+                        throw new Error("No audio stream available");
+                    }
+                    streamUrl = audioFormats[0].url;
+                    // Fallback message for audio
+                    errorMessageDiv.textContent = 'Note: Audio will be downloaded in its original format (webm/m4a). MP3 conversion is not supported in browser.';
                     errorMessageDiv.style.display = 'block';
-                    progressContainer.style.display = 'none';
+                } else {
+                    // Video download
+                    const videoFormats = ytdl.filterFormats(info.formats, 'video');
+                    let selectedFormat = videoFormats[0]; // Default to first available
+
+                    if (format !== 'highest') {
+                        selectedFormat = videoFormats.find(f => f.qualityLabel === format) || videoFormats[0];
+                    }
+
+                    if (!selectedFormat) {
+                        throw new Error(`No video stream available for quality: ${format}`);
+                    }
+                    streamUrl = selectedFormat.url;
                 }
-            };
-            source.onerror = function() {
-                source.close();
-                errorMessageDiv.textContent = 'Error tracking download progress.';
+
+                // Trigger download in browser
+                const link = document.createElement('a');
+                link.href = streamUrl;
+                link.download = `${info.videoDetails.title}.${type === 'audio' ? 'm4a' : 'mp4'}`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (error) {
+                errorMessageDiv.textContent = 'Error starting download: ' + error.message;
                 errorMessageDiv.style.display = 'block';
-                progressContainer.style.display = 'none';
-            };
+            }
         }
     </script>
 </body>
